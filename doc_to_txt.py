@@ -2,7 +2,7 @@ import sys
 import os
 import win32com.client
 
-# 使用 Word 将 .doc 或 .docx 文件转换为 UTF-8 编码的 .txt 文件
+# 使用 Word 读取 Unicode 正文，由 Python 写入 UTF-8 编码的 .txt 文件
 def convert_doc_to_txt(doc_path):
     # 检查文件是否存在
     if not os.path.exists(doc_path):
@@ -15,32 +15,43 @@ def convert_doc_to_txt(doc_path):
         print(f"不支持的文件类型: {ext}，仅支持 .doc 和 .docx")
         return
 
+    doc_path = os.path.abspath(doc_path)
+
     # 输出路径：与源文件同目录，同名 .txt
     txt_path = os.path.splitext(doc_path)[0] + '.txt'
 
-    # 启动 Word 应用程序（后台运行）
-    word = win32com.client.Dispatch("Word.Application")
-    word.Visible = False          # 不显示 Word 窗口
-    word.DisplayAlerts = 0        # 关闭所有提示对话框
-
+    word = None
+    doc = None
     try:
+        # 使用独立的 Word 实例，避免关闭用户正在使用的 Word
+        word = win32com.client.DispatchEx("Word.Application")
+        word.Visible = False
+        word.DisplayAlerts = 0
+
         # 打开文档
         doc = word.Documents.Open(doc_path, ReadOnly=True)
 
-        # 另存为编码文本，编码指定为 UTF-8 (65001)
-        # FileFormat=7 表示 wdFormatEncodedText（编码文本）
-        doc.SaveAs2(txt_path, FileFormat=7, Encoding=65001)
+        # COM 返回 Unicode 字符串，文本编码由 Python 控制
+        text = doc.Content.Text
+        text = text.replace('\r\n', '\n').replace('\r', '\n').replace('\x0b', '\n')
+        text = text.replace('\x07', '').replace('\ufeff', '').replace('\u00ad', '')
 
-        # 关闭文档
-        doc.Close(False)
+        # UTF-8 BOM 便于 Windows 文本编辑器识别编码
+        with open(txt_path, 'w', encoding='utf-8-sig', newline='\n') as f:
+            f.write(text)
+
         print(f"转换成功: {doc_path} -> {txt_path}")
 
     except Exception as e:
         print(f"转换失败: {doc_path}\n错误信息: {e}")
 
     finally:
-        # 退出 Word
-        word.Quit()
+        try:
+            if doc is not None:
+                doc.Close(False)
+        finally:
+            if word is not None:
+                word.Quit()
 
 def main():
     # 获取拖拽到 exe 上的文件路径列表
